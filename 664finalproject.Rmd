@@ -1,0 +1,437 @@
+---
+title: "Analyzing Life Expectancy Using Linear Models"
+author: "Thanh Ho, Akshay Sakanaveeti, Malavika Mampally"
+date: "2023-12-04"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This dataset called Life Expectancy (WHO), sourced from Kaggle.com and originally obtained from the World Health Organization's Global Health Observatory (GHO), is a comprehensive study examining the impact of immunization and the Human Development Index (HDI) on life expectancy. This suggests that the data is likely to be authoritative and reliable for studying health-related factors. It takes into account critical immunization factors such as Hepatitis B, Polio, and Diphtheria, alongside economic indicators, social variables, education metrics, and other health-related factors. Through the analysis of this dataset, we aim to predict life expectancy based on these variables and formulate evidence-based policies to enhance public health outcomes. Analyzing such a dataset can lead to valuable insights that may help governments, healthcare organizations, and policymakers make informed decisions to improve public health and life expectancy.
+
+### **Data**
+
+The dataset has 2938 observations. Each observation has information about life expectancy of a country in a year along with 22 economical and immunization related factors. The predicting variables can be broadly classified into different categories. The following is a list of some of the features.
+
+-   Alcohol-Alcohol, recorded per capita (15+) consumption (in litres of pure alcohol)
+
+-   percentage expenditure-Expenditure on health as a percene of Gross Domestic Product per capita(%)
+
+-   Adult Mortality-Adult Mortality Rates of both sexes (probability of dying between 15 and 60 years per 1000 population)
+
+-   infant deaths-Number of Infant Deaths per 1000 population
+
+-   Life expectancy-Life Expectancy in age
+
+-   Status-Developed or Developing status
+
+-   Year-Year
+
+-   Country-Country
+
+-   Hepatitis B-Hepatitis B (HepB) immunization coverage among 1-year-olds (%)
+
+-   Measles-Measles - number of reported cases per 1000 population
+
+-   BMI-Average Body Mass Index of entire population
+
+-   under-five deaths-Number of under-five deaths per 1000 population
+
+-   Polio-Polio (Pol3) immunization coverage among 1-year-olds (%)
+
+-   Total expenditure-General government expenditure on health as a percene of total government expenditure (%)
+
+-   Diphtheria-Diphtheria tetanus toxoid and pertussis (DTP3) immunization coverage among 1-year-olds (%)
+
+-   HIV/AIDS-Deaths per 1 000 live births HIV/AIDS (0-4 years)
+
+-   GDP-Gross Domestic Product per capita (in USD)
+
+-   Population-Population of the country-
+
+-   thinness 1-19 years-Prevalence of thinness among children and adolescents for Age 10 to 19 (%)
+
+-   thinness 5-9 years-Prevalence of thinness among children for Age 5 to 9(%)
+
+-   Income composition of resources-Income composition of resources
+
+-   Schooling - Number of years of Schooling(years)
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+library(tidyverse)
+library(corrplot)
+library(RColorBrewer)
+library(dplyr)
+library(tidyverse)
+library(MASS)
+library(ggplot2)
+library(psych)
+library(gridExtra) # grid.arrange to make quick subplots
+library(reshape2)
+library(corrplot)
+library(leaps)
+require(leaps)
+library(regclass)
+```
+
+To begin analyzing the dataset, it is essential to address missing data by removing entries that pertain to countries without complete population data spanning the entire 15-year period (2000-2015). This step ensures the integrity and completeness of the dataset for further examination.
+
+```{r include=FALSE}
+#import
+file_id <- '1EFdMMtY56ratuqrveLGKebSsnohxM-Cf'
+file_link <- sprintf('https://drive.google.com/uc?id=%s', file_id)
+df=read_csv(file_link)
+colnames(df)=c("Country", "Year", "Status", "Life.expectancy", "Adult.Mortality", "infant.deaths", "Alcohol", "percentage.expenditure", "Hepatitis.B", "Measles", "BMI", "under.five.deaths", "Polio", "Total.expenditure", "Diphtheria", "HIV/AIDS", "GDP", "Population", "thinness.1.19.years", "thinness.5.9.years", "Income.composition.of.resources", "Schooling"
+)
+#filter
+country_years <- df %>%
+  group_by(Country) %>%
+  summarise(unique_years = n_distinct(Year))
+countries_with_16_year <- country_years$Country[country_years$unique_years == 16]
+df=df%>%filter(Country %in% countries_with_16_year)
+df=df%>%mutate(le1= lead(Life.expectancy, default = NA))
+df=df%>%filter(Year %in% 2001:2015)
+df=na.omit(df)
+df <- df %>% rownames_to_column(var = "index") %>%dplyr::select(-index)
+df$Status=as.factor(df$Status)
+df$Country=as.factor((df$Country))
+
+df$Status <- unclass(df$Status)
+df2 = df
+df = df[,-c(1,23)]
+
+df <- mutate_all(df, function(x) as.numeric(as.character(x)))
+```
+
+We initiate our exploration of the dataset by conducting an overall analysis, including the visualization of correlation relationships among variables. The examination reveals positive correlations between life expectancy and income, as well as life expectancy and schooling. Conversely, a negative correlation is observed between life expectancy and adult mortality. Additionally, positive correlations are identified between variables such as thinness 1.19 years and thinness 5.9 years, percentage expenditure and GDP, and infant death and under-five death. Notably, some variables exhibit reasonable correlations, such as percentage expenditure and GDP, where expenditure utilizes the same variables as GDP. Given the dataset's numerous variables, a subsequent step involves checking for multicollinearity to ensure the accuracy of the model.
+
+```{r echo=FALSE}
+#Correlation between variables plot
+
+corrplot::corrplot(cor(df),type = "upper", tl.pos = "td",
+         method = "circle", tl.cex = 0.5, tl.col = 'black',
+         order = "hclust")
+
+```
+
+Plots of some highly correlated variables
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,2))
+
+
+#Life expectancy with schooling
+
+plot(y = df$infant.deaths,
+
+x = df$under.five.deaths,
+
+xlab = "Under 5 death",
+
+  ylab = "Infant deaths")
+
+
+plot(y = df$GDP,
+
+x = df$percentage.expenditure,
+
+xlab = "Percentage.Expenditure",
+
+ylab = "GDP")
+
+
+
+```
+
+We fit the model to data to identify any potential issues with data.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+model=lm(Life.expectancy~.,df)
+summary(model)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(2,2))
+plot(model)
+```
+
+-   There are some variables which seem to be insignificant.
+
+-   The correlation plot suggests the presence of multicollinearity.
+
+-   The qq plot suggests that the data is nearly normal. We will later check to see if a transformation can make the data better.
+
+-   The residual vs fitted plot indicates some of the residuals are extremely high. This raises the suspicion for outliers in the data.
+
+    We will explore these issues next.
+
+**Splitting the data**
+
+Before proceeding with further data analysis, we will split the data into training and testing sets with an 80:20 ratio to evaluate the model's performance on new, unseen data and prevent overfitting, ensuring its ability to generalize beyond the training set.
+
+```{r warning=FALSE, include=FALSE}
+set.seed(100)
+sample <- sample.int(n = nrow(df), size = floor(.8*nrow(df)), replace = F)
+train <- df[sample, ]
+test  <- df[-sample, ]
+
+train2 = df2[sample,]
+
+```
+
+Following is the summary of model fit on the training data.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+train_model=lm(Life.expectancy~.,train)
+summary(train_model)
+
+```
+
+```{r echo=FALSE}
+par(mfrow=c(2,2))
+plot(train_model)
+```
+
+-   **Residual Analysis**
+
+    The data has n= 1270 and p =21 predictors right now.
+
+    We investigate the presence of outliers first using *standard residuals and studentised residuals.*
+
+The cutoff we use is (1-1/n)% quantile for t\_{n-p-1} distribution which turns out to be 2.498. (red lines in the plot)
+
+By utilizing the "rstandard" and "rstudent" functions, we examine potential outliers within the dataset and identify 6 out of 1270 observations as outliers. Opting to address these outliers separately, our scrutiny begins with an analysis of their behaviors.
+
+```{r echo=FALSE, warning=FALSE}
+#Standardised residuals
+par(mfrow = c(1,2))
+n= 1270
+p =21
+thresh = qt(1-1/n,n-p-1)
+plot(rstandard(train_model), main = "standard residuals")
+abline(h = thresh, lty = 2, col = "red")
+abline(h = -thresh, lty = 2,col = "red")
+
+plot(rstudent(model), main = "studentized residuals")
+abline(h = thresh, lty = 2, col = "red")
+abline(h = -thresh, lty = 2,col = "red")
+```
+
+Upon scrutinizing these outliers, it becomes apparent that Sierra Leone accounts for more than half of the identified instances with life expectancy values between 39 and 54, with the average being 46. Initiating a closer examination, Sierra Leone stands out primarily due to an exceptionally low life expectancy value recorded between 2000 and 2015. Delving deeper, we uncover that Sierra Leone faced formidable challenges during this period, including civil conflict, a substantial disease burden, and pervasive poverty. Specifically, during this period, Sierra Leone underwent post-civil war recovery (2002-2007), followed by an Ebola outbreak (2014-2016). Sierra Leone serves as a case study to understand the negative impacts on life expectancy, allowing us to formulate policies tailored to address such challenges.
+
+```{r echo=FALSE, warning=FALSE}
+outliers = which(abs(rstudent(train_model)) > thresh)
+train_w_out = train[outliers,]
+
+train2[outliers,]
+```
+
+On the other hand, France exhibits an exceptionally high life expectancy value of 89, serving as an example of positive impacts on life expectancy. Upon closer inspection of the data for France, it is observed that indicators such as death under five and HIV/AIDS have the lowest values compared to those of other countries. Meanwhile, variables such as Income composition of resources, schooling, population, diphtheria, BMI, Polio, and alcohol are among the highest. These indications suggest the potential for regression models based on these variables, highlighting avenues for further exploration and analysis.
+
+The summary of the model after removing the outliers.
+
+```{r echo=FALSE, warning=FALSE}
+
+train =  train[-outliers,]
+train = train %>% rownames_to_column(var = "index") %>% dplyr::select(-index)
+train_model=lm(Life.expectancy~.,train)
+summary(train_model)
+
+
+
+```
+
+```{r echo=FALSE, warning=FALSE}
+par(mfrow = c(2,2))
+plot(train_model)
+```
+
+Given the relatively low number of outliers in comparison to the dataset, the choice was made to eliminate these outliers. Subsequent to this outlier removal, a meticulous examination of influential observations was conducted using Cook's distance and hat value. Since the overall model appears to be well-fitted, we utilize Cook's distance as a metric to assess the influence of individual observations on the regression model. 50% quantile for F_p,n-p is distribution is 0.9688527
+
+10% quantile for F_p,n-p is distribution is 0.629304
+
+```{r echo=FALSE, warning=FALSE}
+n=1264
+p= 21
+#Highly influential points 50%
+thresh_inf = qf(0.1, p,n-p)
+thresh_high = qf(0.5, p,n-p)
+plot(cooks.distance(train_model), main = "Cook's distance")
+abline(h = thresh_high, lty = 2, col = "red")
+abline(h = thresh_inf, lty = 2,col = "blue")
+```
+
+```{r echo=FALSE, warning=FALSE}
+plot(hatvalues(train_model), main = "Hat Values")
+
+```
+
+The results from both metrics indicate the absence of influential observations. With this confirmation, we proceed to the next phase of analysis.
+
+**Multicollinearity.**
+
+```{r echo=FALSE, warning=FALSE}
+lm_train=lm(Life.expectancy~.,train)
+data.frame(sort(VIF(lm_train), decreasing =TRUE))
+```
+
+It is not surprising to note that the variable pairs: infant.deaths and under.five.deaths, GDP and percentage.expenditure have high VIF indicating the presence of multicollinearity.
+
+According to WHO, about 60% of deaths of infants are part of under.five.deaths. That explains the high correlation between these two variables.We choose to eliminate the redundant variable (infant deaths).
+
+Percentage of expenditure is defined as the percentage of GDP being spent on the healthcare system of the country. Because of this overlap, the variables depict high correlation and hence we eliminate one of them. (percentage expenditure)
+
+Another pair that seems to be obviously highly related is thinness in age group 5-9 and thinness in the age group 10-19.This variable, as defined in the data source, captured the 'thinness' of children in that age group. We would ideally believe that this has some sort of effect on life expectancy, but there was no further information on the units they were measured in. If it were to involve any bodily measurements, we already have it recorded in BMI. In that case both the variables might be redundant. On the other hand, if it compares waist, hip and other relevant body parts width measurements, then it definitely stands as a separate entity.
+
+Despite the fact that both are relevant in the 2nd case, we believe it is fair to exclude the age group 10-19 for two reasons:First, at this stage, the thinness is dependent on the lifestyle of these kids' lives. The country as a whole will have no part affecting the life expectancy of these kids.Second, the thinness at an older age can be also caused due to genetic reasons, or faster metabolism. It is hard to pin down the fact that this variable can provide a logical explanation about life expectancy.
+
+```{r warning=FALSE, include=FALSE}
+#removed the multicollinearity in variables. Keeping the country variable. 
+train = train[,-c(7,17,19)]
+test = test[,-c(7,17,19)]
+
+train = train %>% relocate(Life.expectancy, .after = last_col())
+test = test %>% relocate(Life.expectancy, .after = last_col())
+
+```
+
+Model after fitting removing the correlated variables.
+
+```{r echo=FALSE, warning=FALSE}
+lm_train=lm(Life.expectancy~.,train)
+par(mfrow = c(2,2))
+plot(lm_train)
+```
+
+```{r echo=FALSE, warning=FALSE}
+lm_train = lm(Life.expectancy~., train)
+summary(lm_train)
+```
+
+**Normality**
+
+The following is the Q-Q plot for the model on training data.
+
+```{r echo=FALSE, warning=FALSE}
+
+lm_train=lm(Life.expectancy~.,train)
+summary(lm_train)
+#par(mfrow = c(2,2))
+plot(lm_train,2)
+
+
+```
+
+p-value of Kolmogorov-Smirnov test is 0.06748. This is just barely above the 0.05 threshold.
+
+```{r echo=FALSE, warning=FALSE}
+
+sres=lm_train$resid/summary(lm_train)$sigma 
+ks.test(sres,y='pnorm')
+```
+
+We now look at the BoxCox plot to see if a transformation can improve the normality. The best value of lambda is very close to 1, which suggests us to not transform the variables.
+
+```{r echo=FALSE, warning=FALSE}
+bc = boxcox(lm_train)
+
+```
+
+**Variable Selection**
+
+Given Lasso's capability to induce sparsity in the model by driving certain coefficients to zero, it serves as a potent tool for both variable selection and the identification of multicollinearity. Consequently, we will utilize this method to perform variable selection and address multicollinearity in our modeling process
+
+```{r echo=FALSE, warning=FALSE}
+library(nortest)
+library(lars)
+train_ = train[ , -c(18)] 
+lm_lasso= lars(data.matrix(train_),train$Life.expectancy)
+plot(lm_lasso)
+```
+
+Root Mean Square for the Lasso model.
+
+```{r warning=FALSE, include=FALSE}
+
+matrix_test = as.matrix(test[,-18])
+class(matrix_test) <- "numeric"
+
+lasso_tested =predict(lm_lasso,matrix_test,mode="fraction")$fit
+
+mean((test$Life.expectancy - lasso_tested)^2)
+
+```
+
+Ridge Regression
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#train_fat2= data.frame(scale(train, center = TRUE,scale = TRUE)) 
+library(glmnet)
+x = data.matrix(train[,-18])
+y = unlist(train[,18])
+
+
+model <- glmnet(x, y, alpha = 0)
+cv_model <- cv.glmnet(x, y, alpha = 0)
+best_lambda <- cv_model$lambda.min
+best_model <- glmnet(x, y, alpha = 0, lambda = best_lambda)
+
+y_predicted <- predict(model, s = best_lambda, newx = x)
+
+mean((y-y_predicted)^2)
+
+coef <- coef(best_model)[,1]
+sorted_coef <- sort(coef, decreasing = TRUE)
+print(data.frame(sorted_coef))
+
+```
+
+Principal Least Square Regression
+
+```{r echo=FALSE, warning=FALSE}
+library(pls)
+set.seed(12131231)
+model <- plsr(Life.expectancy~.,data = train, scale=TRUE, validation="CV")
+#validationplot(model)
+
+model <- plsr(Life.expectancy~., data=train, scale=TRUE, validation="CV")
+pcr_pred <- predict(model, test[,-18], ncomp=2)
+
+mean((unlist(test[,18]-pcr_pred))^2)
+```
+
+Ordinary least squares
+
+```{r echo=FALSE, warning=FALSE}
+lm_train = lm(Life.expectancy~., train)
+lm_tested= predict(lm_train,newdata = test[,-18], type="response") 
+
+y_diff = unlist(test[,18]-lm_tested)
+
+mean(y_diff^2)
+
+
+summary(lm_train)
+
+```
+
+Upon examining the root mean square error (RMSE), it was evident that ridge regression yielded the optimal RMSE, utilizing a model encompassing all 18 variables. Notably, variables such as income composition of resources, schooling, and total expenditure exhibited the most significant positive influence in contrast to factors like development status (developing/developed), HIV/AIDS, and alcohol use. Interestingly, unlike the observed outliers, the highest levels of alcohol use were positively correlated with higher life expectancy values.
+
+#### Conclusion
+
+In summary, our exploration of the Life Expectancy dataset involved a thorough analysis of correlation relationships, detection of outliers, and addressing multicollinearity. Splitting the data into training and testing sets allowed us to assess the model's performance and address potential overfitting. Notably, Sierra Leone emerged as a significant outlier with unique challenges impacting life expectancy, while France stood out as a positive example.
+
+The removal of outliers and examination of influential observations confirmed the overall model's fitness. Multicollinearity was addressed by eliminating redundant variables, enhancing the accuracy of subsequent analyses. Ridge regression, determined through RMSE evaluation, yielded an optimal model encompassing all 18 variables. Key influencers on life expectancy included income composition of resources, schooling, and total expenditure.
+
+Surprisingly, the analysis revealed that the highest levels of alcohol use were positively correlated with higher life expectancy values, challenging conventional outlier patterns. This comprehensive study provides valuable insights for policymakers and healthcare organizations, offering evidence-based recommendations to enhance public health outcomes and life expectancy.
+
+In our attempt to incorporate one year's life expectancy as a predictor for the next, akin to an AR(1) time series model, we discovered that including this variable suggests the need for a nonlinear regression model. However, this falls beyond our current knowledge scope, and we express the intention to delve into this complex model in future research endeavors. Exploring the intricacies of a nonlinear regression model could provide valuable insights into the dynamic relationships affecting life expectancy over time, opening avenues for more nuanced and accurate predictions.
